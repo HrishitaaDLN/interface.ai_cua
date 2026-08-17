@@ -5,6 +5,7 @@ outcome, or a hard failure.
 from __future__ import annotations
 
 import uuid
+from typing import Callable, Optional
 
 from .driver import Driver
 from .models import (BusinessOutcome, CapabilityArtifact, Failure,
@@ -16,6 +17,12 @@ from .safety import SafetyGate
 # becomes exactly the hard failure it would have been without this at all.
 MAX_SLOW_RETRIES = 3
 MAX_INTERSTITIAL_DISMISSALS = 3
+
+# Called (context: dict, screenshot: bytes | None) exactly when replay is
+# about to return a Failure -- a genuine stuck state, not a business
+# outcome. Never called for Success or BusinessOutcome. context is already
+# redacted; screenshot is raw and left to the caller to persist (or not).
+OnStuck = Callable[[dict, Optional[bytes]], None]
 
 
 def _check(obs, checkpoint: str) -> bool:
@@ -66,17 +73,39 @@ def _await_checkpoint(driver, obs, checkpoint, step_id, recovered):
     return obs
 
 
+def _fail(artifact, gate, on_stuck, recovered, run_id, obs, step_id,
+          expected, observed) -> Failure:
+    """Builds the Failure result and, if an on_stuck hook is wired, auto-
+    raises a handoff request carrying real context before returning it --
+    the same shape a human calling /handoff/request would create, just
+    triggered by the system instead of a person. Only ever called on a
+    genuine stuck state; Success and BusinessOutcome never go through this.
+    """
+    result = Failure(step=step_id, expected=expected, observed=observed,
+                     run_id=run_id, recovered=recovered)
+    if on_stuck:
+        snapshot = gate.redact({"screen": obs.screen, "fields": dict(obs.fields)})
+        context = {
+            "capability": artifact.name,
+            "step": step_id,
+            "reason": f"expected {expected}, observed {observed}",
+            "snapshot": snapshot,
+        }
+        on_stuck(context, obs.screenshot)
+    return result
+
+
 def replay(artifact: CapabilityArtifact, inputs: dict, driver: Driver,
-           gate: SafetyGate) -> Result:
+           gate: SafetyGate, on_stuck: Optional[OnStuck] = None) -> Result:
     run_id = str(uuid.uuid4())[:8]
     recovered: list[RecoveredEvent] = []
 
     for step in artifact.steps:
         decision = gate.check(step.action)
         if decision == "deny":
-            return Failure(step=step.id, expected="allowed action",
-                           observed="blocked by allowlist", run_id=run_id,
-                           recovered=recovered)
+            obs = driver.perceive()
+            return _fail(artifact, gate, on_stuck, recovered, run_id, obs,
+                        step.id, "allowed action", "blocked by allowlist")
 
         value = None
         if step.value_from and step.value_from.startswith("input."):
@@ -86,7 +115,8 @@ def replay(artifact: CapabilityArtifact, inputs: dict, driver: Driver,
         obs = driver.perceive()
         obs = _dismiss_known_interstitials(artifact, driver, obs, step.id, recovered)
 
-        # known business outcome? (e.g. landed on "not found")
+        # known business outcome? (e.g. landed on "not found") -- a valid
+        # answer, never routed through _fail, never raises a handoff.
         for ko in artifact.known_outcomes:
             if _check(obs, ko.detect):
                 return BusinessOutcome(name=ko.name, run_id=run_id,
@@ -96,23 +126,20 @@ def replay(artifact: CapabilityArtifact, inputs: dict, driver: Driver,
         # a hard failure if it never resolves.
         obs = _await_checkpoint(driver, obs, step.checkpoint, step.id, recovered)
         if step.checkpoint and not _check(obs, step.checkpoint):
-            return Failure(step=step.id, expected=step.checkpoint,
-                           observed=f"screen={obs.screen}", run_id=run_id,
-                           recovered=recovered)
+            return _fail(artifact, gate, on_stuck, recovered, run_id, obs,
+                        step.id, step.checkpoint, f"screen={obs.screen}")
 
     # success checkpoint + collect declared outputs
     obs = driver.perceive()
     obs = _await_checkpoint(driver, obs, artifact.success, "success", recovered)
     if not _check(obs, artifact.success):
-        return Failure(step="success", expected=artifact.success,
-                       observed=f"screen={obs.screen}", run_id=run_id,
-                       recovered=recovered)
+        return _fail(artifact, gate, on_stuck, recovered, run_id, obs,
+                    "success", artifact.success, f"screen={obs.screen}")
 
     outputs = {o.name: obs.fields.get(o.name) for o in artifact.outputs}
     if any(v is None for v in outputs.values()):
         missing = [k for k, v in outputs.items() if v is None]
-        return Failure(step="success", expected=f"outputs {missing} present",
-                       observed="missing on page", run_id=run_id,
-                       recovered=recovered)
+        return _fail(artifact, gate, on_stuck, recovered, run_id, obs,
+                    "success", f"outputs {missing} present", "missing on page")
 
     return Success(outputs=outputs, run_id=run_id, recovered=recovered)

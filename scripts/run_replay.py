@@ -12,6 +12,11 @@ approved artifact recorded from discovery. Each step's resolved rung is
 read back from driver.rung_log and saved alongside the result, so it can be
 compared against what discovery recorded for the same steps.
 
+Also wires replay's on_stuck hook: a hard failure auto-raises a handoff
+request carrying real context (capability, step, reason, a redacted state
+snapshot, a screenshot path if one exists). A business outcome must never
+raise one.
+
 Precondition: the legacy bank server must already be running:
     uvicorn legacy_bank.server:app --port 8080
 
@@ -44,6 +49,20 @@ def _run(scenario: str, artifact: CapabilityArtifact, member_id: str,
     out_dir = ROOT / "evidence" / f"replay-{scenario}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    raised_handoffs: list[dict] = []
+
+    def on_stuck(context: dict, screenshot) -> None:
+        # context is already redacted by replay.py. Saving the screenshot
+        # (if any) and recording its path is this layer's job, same as the
+        # existing failure-screenshot handling below.
+        if screenshot:
+            path = out_dir / "handoff_screenshot.png"
+            path.write_bytes(screenshot)
+            context["snapshot"]["screenshot_path"] = str(path.relative_to(ROOT))
+        else:
+            context["snapshot"]["screenshot_path"] = None
+        raised_handoffs.append(context)
+
     with PlaywrightBankDriver(headless=True) as driver:
         # Bootstrap navigation, same role as main.py constructing a fresh
         # driver per request -- replay() itself never navigates, it assumes
@@ -52,7 +71,8 @@ def _run(scenario: str, artifact: CapabilityArtifact, member_id: str,
         # test-only injection point FakeBankDriver used a constructor flag
         # for; the recipe's steps know nothing about it either way.
         driver.act("navigate", value=entry_url)
-        result = replay(artifact, {"member_id": member_id}, driver, gate)
+        result = replay(artifact, {"member_id": member_id}, driver, gate,
+                        on_stuck=on_stuck)
 
         steps_executed = [
             {"step_id": step.id, "action": step.action,
@@ -67,6 +87,7 @@ def _run(scenario: str, artifact: CapabilityArtifact, member_id: str,
             "inputs": {"member_id": member_id},
             "result": json.loads(result.model_dump_json()),
             "steps_executed": steps_executed,
+            "handoff_requests": raised_handoffs,
         }, extra_keys=redaction_keys_from_artifact(artifact.redaction))
         (out_dir / "step_log.json").write_text(json.dumps(step_log, indent=2))
 
@@ -80,6 +101,9 @@ def _run(scenario: str, artifact: CapabilityArtifact, member_id: str,
     for e in steps_executed:
         print(f"  {e['step_id']} ({e['action']}): rung={e['resolved_rung']} "
               f"strategy={e['resolved_strategy']} ok={e['ok']}")
+    if raised_handoffs:
+        print("  handoff auto-raised:")
+        print(json.dumps(raised_handoffs, indent=2))
 
 
 def main() -> None:

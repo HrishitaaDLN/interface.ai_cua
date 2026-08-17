@@ -9,7 +9,7 @@
     "step": "d3",
     "expected": "field:savings_balance",
     "observed": "screen=detail",
-    "run_id": "8747e3ae",
+    "run_id": "ce9aa38d",
     "recovered": []
   },
   "steps_executed": [
@@ -33,6 +33,21 @@
       "resolved_rung": null,
       "resolved_strategy": null,
       "ok": false
+    }
+  ],
+  "handoff_requests": [
+    {
+      "capability": "lookup_savings",
+      "step": "d3",
+      "reason": "expected field:savings_balance, observed screen=detail",
+      "snapshot": {
+        "screen": "detail",
+        "fields": {
+          "member_id": "12345",
+          "name": "Ada Lovelace"
+        },
+        "screenshot_path": "evidence\\replay-failure\\handoff_screenshot.png"
+      }
     }
   ]
 }

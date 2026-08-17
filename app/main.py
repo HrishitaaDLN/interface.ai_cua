@@ -6,6 +6,10 @@ Docs: http://localhost:8000/docs
 """
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -20,8 +24,37 @@ store = ArtifactStore()
 gate = SafetyGate(allowed_actions={"type", "click", "read", "wait", "navigate"},
                   redact_keys={"ssn", "password", "token"})
 
+HANDOFF_EVIDENCE_DIR = Path(__file__).resolve().parent.parent / "evidence" / "handoff"
+
 # in-memory handoff control token: one holder at a time
 handoff = {"state": "AGENT_CONTROL", "context": None}
+
+
+def _raise_handoff(context: dict) -> dict:
+    """The one place a handoff request actually gets created, whether a
+    human called /handoff/request or replay auto-escalated on a hard
+    failure. A new request replaces any existing pending one.
+    """
+    handoff["state"] = "HANDOFF_REQUESTED"
+    handoff["context"] = context
+    return handoff
+
+
+def _on_replay_stuck(context: dict, screenshot: Optional[bytes]) -> None:
+    """Wired into replay() as on_stuck: called only when replay is about to
+    return a Failure. context is already redacted by replay.py before this
+    runs. If a screenshot came with it, save it and record the path -- the
+    driver hands back raw bytes, not a path, so saving is this layer's job,
+    same as the replay evidence scripts already do on a failure.
+    """
+    if screenshot:
+        HANDOFF_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        path = HANDOFF_EVIDENCE_DIR / f"{uuid.uuid4().hex[:8]}.png"
+        path.write_bytes(screenshot)
+        context["snapshot"]["screenshot_path"] = str(path)
+    else:
+        context["snapshot"]["screenshot_path"] = None
+    _raise_handoff(context)
 
 
 class DiscoverReq(BaseModel):
@@ -79,15 +112,24 @@ def invoke(name: str, req: InvokeReq):
     if art.approval_state != ApprovalState.approved:
         raise HTTPException(409, "capability is draft; approve before invoking")
     driver = FakeBankDriver(hide_balance=req.hide_balance)
-    return replay(art, req.inputs, driver, gate)
+    return replay(art, req.inputs, driver, gate, on_stuck=_on_replay_stuck)
 
 
 # ---- handoff seam ----------------------------------------------------------
+# take/release are unchanged. request is enriched: it now carries real
+# context (capability, step, reason, a redacted state snapshot) instead of
+# just a reason string, and can be raised by a human OR by replay itself.
+
+class HandoffRequest(BaseModel):
+    reason: str
+    capability: Optional[str] = None
+    step: Optional[str] = None
+    snapshot: Optional[dict] = None
+
 
 @app.post("/handoff/request")
-def handoff_request(reason: str = "stuck"):
-    handoff.update(state="HANDOFF_REQUESTED", context={"reason": reason})
-    return handoff
+def handoff_request(req: HandoffRequest):
+    return _raise_handoff(req.model_dump())
 
 
 @app.post("/handoff/take")

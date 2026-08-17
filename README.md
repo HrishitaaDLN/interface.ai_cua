@@ -39,8 +39,10 @@ curl -X POST localhost:8000/capabilities/lookup_savings/invoke \
   -d '{"inputs":{"member_id":"12345"},"hide_balance":true}'
 #   -> {"status":"failure","step":"s3","expected":"field:savings_balance", ...}
 
-# handoff seam
-curl -X POST 'localhost:8000/handoff/request?reason=unknown+dialog'
+# handoff seam (manual request shown here; replay also auto-raises one on
+# a hard failure, with capability/step/reason/snapshot already filled in)
+curl -X POST localhost:8000/handoff/request \
+  -H 'content-type: application/json' -d '{"reason":"unknown dialog"}'
 curl -X POST localhost:8000/handoff/take
 curl -X POST localhost:8000/handoff/release
 ```

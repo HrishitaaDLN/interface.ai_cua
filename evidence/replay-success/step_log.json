@@ -9,7 +9,7 @@
     "outputs": {
       "savings_balance": "$4,210.55"
     },
-    "run_id": "6ae34184",
+    "run_id": "f8ccee1a",
     "recovered": []
   },
   "steps_executed": [
@@ -34,5 +34,6 @@
       "resolved_strategy": "label_anchor",
       "ok": true
     }
-  ]
+  ],
+  "handoff_requests": []
 }
