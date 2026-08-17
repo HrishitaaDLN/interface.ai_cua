@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
 .env
-evidence/*.png
+evidence/**/*.png
 .pytest_cache/
 *.egg-info/
