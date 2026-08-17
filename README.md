@@ -53,3 +53,8 @@ curl -X POST localhost:8000/handoff/release
 - Stubbed at a clean seam: discovery (a real LLM-driven run plugs into
   `fake_discovery`) and the surface (`FakeBankDriver` stands in for a Playwright
   `WebDriver`). Both sit behind interfaces so swapping them changes nothing above.
+
+In production, screenshots are redacted or withheld entirely (see "Screenshots
+are the sneaky leak" in FINAL-DESIGN-AND-STACK.md) — the one screenshot tracked
+in this repo (`evidence/discovery-run/final_screenshot.png`) is safe to commit
+only because it's fake demo data (Ada Lovelace, a made-up balance).

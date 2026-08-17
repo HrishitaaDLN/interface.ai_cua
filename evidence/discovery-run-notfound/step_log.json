@@ -1,0 +1,65 @@
+{
+  "goal": "look up member 99999 and read their savings balance",
+  "model": "gemini-2.5-flash",
+  "model_calls": 3,
+  "stop_reason": "business_outcome",
+  "known_outcome": {
+    "name": "member_not_found",
+    "detect": "screen==not_found",
+    "returns": "member_not_found"
+  },
+  "turns": [
+    {
+      "turn": 1,
+      "observed_screen": "search",
+      "model_decided": {
+        "action": "type",
+        "target_description": "the Member ID textbox",
+        "value": "99999"
+      },
+      "ladder_tried": [
+        "role_name=textbox::the Member ID textbox",
+        "role_name=textbox::"
+      ],
+      "resolved_rung": 2,
+      "resolved_strategy": "role_name",
+      "screen_after": "search",
+      "ok": true,
+      "note": ""
+    },
+    {
+      "turn": 2,
+      "observed_screen": "search",
+      "model_decided": {
+        "action": "click",
+        "target_description": "Search button",
+        "value": null
+      },
+      "ladder_tried": [
+        "role_name=button::Search button",
+        "role_name=link::Search button",
+        "role_name=button::"
+      ],
+      "resolved_rung": 3,
+      "resolved_strategy": "role_name",
+      "screen_after": "not_found",
+      "ok": true,
+      "note": ""
+    },
+    {
+      "turn": 3,
+      "observed_screen": "not_found",
+      "model_decided": {
+        "action": "outcome",
+        "target_description": "The page says \"No such member: 99999\".",
+        "value": null
+      },
+      "ladder_tried": [],
+      "resolved_rung": null,
+      "resolved_strategy": null,
+      "screen_after": "not_found",
+      "ok": true,
+      "note": "business outcome 'member_not_found' detected via screen==not_found"
+    }
+  ]
+}

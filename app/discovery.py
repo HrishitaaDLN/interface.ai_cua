@@ -26,15 +26,15 @@ from pydantic import BaseModel
 
 from .driver import Observation, PlaywrightBankDriver
 from .env import load_dotenv
-from .models import (ApprovalState, CapabilityArtifact, Locator, Output,
-                     Param, Step)
+from .models import (ApprovalState, CapabilityArtifact, KnownOutcome, Locator,
+                     Output, Param, Step)
 from .replay import _check  # same checkpoint semantics discovery and replay share
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 MAX_STEPS_DEFAULT = 8
 TIMEOUT_S_DEFAULT = 120
 
-StopReason = Literal["success", "max_steps", "timeout", "dead_end"]
+StopReason = Literal["success", "business_outcome", "max_steps", "timeout", "dead_end"]
 
 PROMPT = """You control a web browser via a driver, ONE action at a time. \
 You never plan more than a single step ahead -- decide only what to do next, \
@@ -56,10 +56,16 @@ Action vocabulary:
   done  -- you believe the goal is already fully satisfied by what's on
            screen; do not choose this unless the requested information is
            visibly present.
+  outcome -- you have hit a genuine DEAD END that is a real business answer,
+           not a crash or a stuck page (e.g. the screen says no such member
+           exists). Name it in outcome_name using short snake_case (e.g.
+           "member_not_found"), and describe in target_description what on
+           screen tells you this.
 
 target_description: plain English, as if pointing at the control on screen
   (e.g. "the Search button", "the member ID text box").
 value: null unless action is "type".
+outcome_name: null unless action is "outcome".
 
 ACCESSIBILITY TREE:
 {tree}
@@ -67,9 +73,10 @@ ACCESSIBILITY TREE:
 
 
 class NextAction(BaseModel):
-    action: Literal["type", "click", "read", "wait", "done"]
+    action: Literal["type", "click", "read", "wait", "done", "outcome"]
     target_description: str
     value: Optional[str] = None
+    outcome_name: Optional[str] = None
 
 
 @dataclass
@@ -118,6 +125,7 @@ class DiscoveryResult:
     goal: str
     model_name: str
     final_screenshot: Optional[bytes] = None
+    known_outcome: Optional[KnownOutcome] = None
 
 
 def _get_client() -> genai.Client:
@@ -206,7 +214,9 @@ def run_discovery(driver: PlaywrightBankDriver, goal: str, entry_point: str,
                   inputs: dict[str, str], success_checkpoint: str,
                   model_name: str = DEFAULT_MODEL,
                   max_steps: int = MAX_STEPS_DEFAULT,
-                  timeout_s: int = TIMEOUT_S_DEFAULT) -> DiscoveryResult:
+                  timeout_s: int = TIMEOUT_S_DEFAULT,
+                  artifact_id: str = "cap_lookup_savings_discovered",
+                  artifact_name: str = "lookup_savings_discovered") -> DiscoveryResult:
     client = _get_client()
 
     # Bootstrap navigation is system-level, not a model decision -- the
@@ -219,6 +229,7 @@ def run_discovery(driver: PlaywrightBankDriver, goal: str, entry_point: str,
     model_calls = 0
     start = time.monotonic()
     stop_reason: StopReason = "max_steps"
+    known_outcome: Optional[KnownOutcome] = None
 
     for turn_no in range(1, max_steps + 1):
         if time.monotonic() - start > timeout_s:
@@ -237,6 +248,27 @@ def run_discovery(driver: PlaywrightBankDriver, goal: str, entry_point: str,
                 note="checkpoint holds" if done_ok
                      else "model declared done but checkpoint does not hold"))
             stop_reason = "success" if done_ok else "dead_end"
+            break
+
+        if decision.action == "outcome":
+            # Detection is at the screen level (obs.screen, the same
+            # classification perceive() already does), not a locator ladder.
+            # This particular dead-end page ("No such member: 99999") has no
+            # label/value structure to anchor a ladder against -- the id is
+            # baked into the one line of text -- so screen-level detection is
+            # both simpler and more robust than pattern-matching dynamic
+            # text. It's also exactly how the hand-written recipe already
+            # expresses known_outcomes (detect="screen==not_found").
+            outcome_name = (decision.outcome_name or "").strip() or "unnamed_outcome"
+            detect = f"screen=={obs.screen}"
+            known_outcome = KnownOutcome(name=outcome_name, detect=detect,
+                                         returns=outcome_name)
+            turns.append(TurnLog(
+                turn=turn_no, observed_screen=obs.screen,
+                decided_action="outcome", decided_target=decision.target_description,
+                decided_value=None, screen_after=obs.screen, ok=True,
+                note=f"business outcome '{outcome_name}' detected via {detect}"))
+            stop_reason = "business_outcome"
             break
 
         ladder, field_key = _build_ladder(decision.action,
@@ -276,21 +308,26 @@ def run_discovery(driver: PlaywrightBankDriver, goal: str, entry_point: str,
         stop_reason = "max_steps"
 
     artifact = None
-    if stop_reason == "success":
+    if stop_reason in ("success", "business_outcome"):
         artifact = _compile_artifact(goal, entry_point, inputs, turns,
-                                     success_checkpoint)
+                                     success_checkpoint, known_outcome=known_outcome,
+                                     artifact_id=artifact_id, artifact_name=artifact_name)
 
     return DiscoveryResult(stop_reason=stop_reason, turns=turns, artifact=artifact,
                            model_calls=model_calls, goal=goal, model_name=model_name,
-                           final_screenshot=obs.screenshot)
+                           final_screenshot=obs.screenshot, known_outcome=known_outcome)
 
 
 def _compile_artifact(goal: str, entry_point: str, inputs: dict[str, str],
-                      turns: list[TurnLog], success_checkpoint: str) -> CapabilityArtifact:
+                      turns: list[TurnLog], success_checkpoint: str,
+                      known_outcome: Optional[KnownOutcome] = None,
+                      artifact_id: str = "cap_lookup_savings_discovered",
+                      artifact_name: str = "lookup_savings_discovered") -> CapabilityArtifact:
     steps: list[Step] = []
     outputs: list[Output] = []
 
-    for i, t in enumerate(turns, start=1):
+    real_turns = [t for t in turns if t.decided_action not in ("done", "outcome")]
+    for i, t in enumerate(real_turns, start=1):
         step_id = f"d{i}"
         value_from = None
         if t.decided_action == "type":
@@ -314,16 +351,19 @@ def _compile_artifact(goal: str, entry_point: str, inputs: dict[str, str],
                           value_from=value_from, checkpoint=checkpoint))
 
     return CapabilityArtifact(
-        id="cap_lookup_savings_discovered",
-        name="lookup_savings_discovered",
+        id=artifact_id,
+        name=artifact_name,
         description=goal,
         target={"app_id": "legacy-core-banking", "entry_point": entry_point,
                 "allowlist_ref": "core-banking"},
         inputs=[Param(name=name, type="string") for name in inputs],
         outputs=outputs,
         steps=steps,
+        # The DECLARED goal condition for this capability, not necessarily
+        # something THIS run observed -- a business-outcome run never
+        # reaches it, by definition. That's what known_outcomes is for.
         success=success_checkpoint,
-        known_outcomes=[],  # only the success path was exercised this run
+        known_outcomes=[known_outcome] if known_outcome else [],
         redaction=[],
         approval_state=ApprovalState.draft,
         provenance={"recorded_by": "real_discovery", "goal": goal},

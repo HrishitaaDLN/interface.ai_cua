@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0.0",
+  "id": "cap_lookup_savings_notfound_discovered",
+  "name": "lookup_savings_notfound_discovered",
+  "description": "look up member 99999 and read their savings balance",
+  "target": {
+    "app_id": "legacy-core-banking",
+    "entry_point": "http://localhost:8080/core-banking",
+    "allowlist_ref": "core-banking"
+  },
+  "inputs": [
+    {
+      "name": "member_id",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    }
+  ],
+  "outputs": [],
+  "steps": [
+    {
+      "id": "d1",
+      "action": "type",
+      "target": [
+        {
+          "strategy": "role_name",
+          "value": "textbox::the Member ID textbox"
+        },
+        {
+          "strategy": "role_name",
+          "value": "textbox::"
+        }
+      ],
+      "value_from": "input.member_id",
+      "checkpoint": null,
+      "retry_safe": true
+    },
+    {
+      "id": "d2",
+      "action": "click",
+      "target": [
+        {
+          "strategy": "role_name",
+          "value": "button::Search button"
+        },
+        {
+          "strategy": "role_name",
+          "value": "link::Search button"
+        },
+        {
+          "strategy": "role_name",
+          "value": "button::"
+        }
+      ],
+      "value_from": null,
+      "checkpoint": "screen==not_found",
+      "retry_safe": true
+    }
+  ],
+  "success": "field:savings_balance",
+  "known_outcomes": [
+    {
+      "name": "member_not_found",
+      "detect": "screen==not_found",
+      "returns": "member_not_found"
+    }
+  ],
+  "redaction": [],
+  "approval_state": "draft",
+  "provenance": {
+    "recorded_by": "real_discovery",
+    "goal": "look up member 99999 and read their savings balance"
+  }
+}
