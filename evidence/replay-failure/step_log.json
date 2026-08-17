@@ -1,0 +1,37 @@
+{
+  "scenario": "failure",
+  "capability": "lookup_savings",
+  "inputs": {
+    "member_id": "12345"
+  },
+  "result": {
+    "status": "failure",
+    "step": "d3",
+    "expected": "field:savings_balance",
+    "observed": "screen=detail",
+    "run_id": "6d919f81"
+  },
+  "steps_executed": [
+    {
+      "step_id": "d1",
+      "action": "type",
+      "resolved_rung": 2,
+      "resolved_strategy": "role_name",
+      "ok": true
+    },
+    {
+      "step_id": "d2",
+      "action": "click",
+      "resolved_rung": 3,
+      "resolved_strategy": "role_name",
+      "ok": true
+    },
+    {
+      "step_id": "d3",
+      "action": "read",
+      "resolved_rung": null,
+      "resolved_strategy": null,
+      "ok": false
+    }
+  ]
+}

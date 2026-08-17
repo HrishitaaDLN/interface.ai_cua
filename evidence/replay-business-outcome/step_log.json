@@ -1,0 +1,28 @@
+{
+  "scenario": "business-outcome",
+  "capability": "lookup_savings",
+  "inputs": {
+    "member_id": "99999"
+  },
+  "result": {
+    "status": "business_outcome",
+    "name": "member_not_found",
+    "run_id": "5b21181b"
+  },
+  "steps_executed": [
+    {
+      "step_id": "d1",
+      "action": "type",
+      "resolved_rung": 2,
+      "resolved_strategy": "role_name",
+      "ok": true
+    },
+    {
+      "step_id": "d2",
+      "action": "click",
+      "resolved_rung": 3,
+      "resolved_strategy": "role_name",
+      "ok": true
+    }
+  ]
+}

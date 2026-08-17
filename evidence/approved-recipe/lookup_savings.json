@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0.0",
+  "id": "cap_lookup_savings",
+  "name": "lookup_savings",
+  "description": "look up member 12345 and read their savings balance",
+  "target": {
+    "app_id": "legacy-core-banking",
+    "entry_point": "http://localhost:8080/core-banking",
+    "allowlist_ref": "core-banking"
+  },
+  "inputs": [
+    {
+      "name": "member_id",
+      "type": "string",
+      "required": true,
+      "sensitive": false
+    }
+  ],
+  "outputs": [
+    {
+      "name": "savings_balance",
+      "type": "string",
+      "source_step": "d3"
+    }
+  ],
+  "steps": [
+    {
+      "id": "d1",
+      "action": "type",
+      "target": [
+        {
+          "strategy": "role_name",
+          "value": "textbox::the textbox"
+        },
+        {
+          "strategy": "role_name",
+          "value": "textbox::"
+        }
+      ],
+      "value_from": "input.member_id",
+      "checkpoint": null,
+      "retry_safe": true
+    },
+    {
+      "id": "d2",
+      "action": "click",
+      "target": [
+        {
+          "strategy": "role_name",
+          "value": "button::Search button"
+        },
+        {
+          "strategy": "role_name",
+          "value": "link::Search button"
+        },
+        {
+          "strategy": "role_name",
+          "value": "button::"
+        }
+      ],
+      "value_from": null,
+      "checkpoint": "screen==detail",
+      "retry_safe": true
+    },
+    {
+      "id": "d3",
+      "action": "read",
+      "target": [
+        {
+          "strategy": "role_name",
+          "value": "cell::the Savings Balance"
+        },
+        {
+          "strategy": "attribute",
+          "value": "[aria-label=\"the Savings Balance\"]"
+        },
+        {
+          "strategy": "label_anchor",
+          "value": "Savings Balance"
+        }
+      ],
+      "value_from": null,
+      "checkpoint": "field:savings_balance",
+      "retry_safe": true
+    }
+  ],
+  "success": "field:savings_balance",
+  "known_outcomes": [
+    {
+      "name": "member_not_found",
+      "detect": "screen==not_found",
+      "returns": "member_not_found"
+    }
+  ],
+  "redaction": [],
+  "approval_state": "approved",
+  "provenance": {
+    "recorded_by": "real_discovery+manual_merge",
+    "goal": "look up member 12345 and read their savings balance",
+    "merged_from": "evidence/discovery-run/draft_artifact.json,evidence/discovery-run-notfound/draft_artifact.json",
+    "approved_by": "operator (this exercise)"
+  }
+}

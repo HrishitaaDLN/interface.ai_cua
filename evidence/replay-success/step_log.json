@@ -1,0 +1,37 @@
+{
+  "scenario": "success",
+  "capability": "lookup_savings",
+  "inputs": {
+    "member_id": "12345"
+  },
+  "result": {
+    "status": "success",
+    "outputs": {
+      "savings_balance": "$4,210.55"
+    },
+    "run_id": "9474619a"
+  },
+  "steps_executed": [
+    {
+      "step_id": "d1",
+      "action": "type",
+      "resolved_rung": 2,
+      "resolved_strategy": "role_name",
+      "ok": true
+    },
+    {
+      "step_id": "d2",
+      "action": "click",
+      "resolved_rung": 3,
+      "resolved_strategy": "role_name",
+      "ok": true
+    },
+    {
+      "step_id": "d3",
+      "action": "read",
+      "resolved_rung": 3,
+      "resolved_strategy": "label_anchor",
+      "ok": true
+    }
+  ]
+}
