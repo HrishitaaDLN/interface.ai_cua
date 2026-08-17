@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT))
 from app.driver import PlaywrightBankDriver
 from app.models import ApprovalState, CapabilityArtifact
 from app.replay import replay
-from app.safety import SafetyGate
+from app.safety import SafetyGate, redaction_keys_from_artifact
 
 ARTIFACT_PATH = ROOT / "evidence" / "approved-recipe" / "lookup_savings.json"
 
@@ -67,7 +67,7 @@ def _run(scenario: str, artifact: CapabilityArtifact, member_id: str,
             "inputs": {"member_id": member_id},
             "result": json.loads(result.model_dump_json()),
             "steps_executed": steps_executed,
-        })
+        }, extra_keys=redaction_keys_from_artifact(artifact.redaction))
         (out_dir / "step_log.json").write_text(json.dumps(step_log, indent=2))
 
         if result.status == "failure":
