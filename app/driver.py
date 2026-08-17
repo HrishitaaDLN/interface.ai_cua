@@ -1,15 +1,19 @@
 """The load-bearing seam: how we perceive and act on a surface.
 
-Interface is two verbs. A real WebDriver would drive Playwright here. The
-FakeDriver simulates a tiny legacy bank app in memory so the whole system
+Interface is two verbs. A real WebDriver drives Playwright (below). The
+FakeBankDriver simulates a tiny legacy bank app in memory so the whole system
 runs end to end with no browser and no model.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
+from urllib.parse import urlparse
 
 from .models import Locator
+
+logger = logging.getLogger("app.driver")
 
 
 @dataclass
@@ -17,6 +21,11 @@ class Observation:
     screen: str                       # which "page" we're on
     controls: dict[str, str]          # control name -> current value/label
     fields: dict[str, str] = field(default_factory=dict)  # readable data
+    # Optional: only a real driver fills these in. FakeBankDriver leaves them
+    # None, and replay.py never reads them, so this is additive, not a
+    # breaking change to the interface.
+    accessibility_tree: Optional[str] = None
+    screenshot: Optional[bytes] = None
 
 
 @dataclass
@@ -84,3 +93,196 @@ class FakeBankDriver:
         if action in ("read", "wait"):
             return ActionResult(True)
         return ActionResult(False, f"unknown action {action} on {name}")
+
+
+# ---- real Playwright driver -------------------------------------------------
+# Same perceive()/act() shapes as FakeBankDriver above. Nothing that calls a
+# Driver needs to know which one it's holding.
+#
+# Locator.value encoding per strategy (a recipe stores these, this class
+# reads them):
+#   role_name    "<role>::<accessible name>"   e.g. "button::Search"
+#   attribute    a CSS selector                e.g. 'input[name="member_id"]'
+#   label_anchor the exact text of a nearby <td> label, e.g. "Savings Balance"
+#   coordinates  "<x>,<y>" page coordinates, e.g. "245,59"
+
+
+class _CoordinateTarget:
+    """Makes a raw (x, y) point look like a Playwright Locator, so act()
+    doesn't need a special case for the last-resort rung."""
+
+    def __init__(self, page, value: str):
+        x, y = value.split(",")
+        self.page, self.x, self.y = page, float(x), float(y)
+
+    def click(self) -> None:
+        self.page.mouse.click(self.x, self.y)
+
+    def fill(self, value: str) -> None:
+        self.page.mouse.click(self.x, self.y)
+        self.page.keyboard.type(value)
+
+    def inner_text(self) -> str:
+        return self.page.evaluate(
+            "([x, y]) => document.elementFromPoint(x, y)?.innerText ?? ''",
+            [self.x, self.y],
+        )
+
+    def wait_for(self, **kwargs) -> None:
+        pass  # a screen point always "exists"; nothing to wait for
+
+
+class PlaywrightBankDriver:
+    """Drives the real legacy bank page at http://localhost:8080 (or
+    wherever base_url points) with Playwright.
+    """
+
+    def __init__(self, base_url: str = "http://localhost:8080",
+                 headless: bool = True):
+        from playwright.sync_api import sync_playwright  # local: no hard
+        # dependency on Playwright for anything that only uses FakeBankDriver
+
+        self.base_url = base_url.rstrip("/")
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(headless=headless)
+        self.page = self._browser.new_page()
+        self.rung_log: list[dict] = []  # which ladder rung matched, in order
+
+    def close(self) -> None:
+        self._browser.close()
+        self._pw.stop()
+
+    def __enter__(self) -> "PlaywrightBankDriver":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # -- perceive -------------------------------------------------------
+
+    def perceive(self) -> Observation:
+        path = urlparse(self.page.url).path
+        body = self.page.locator("body")
+        body_text = body.inner_text()
+        tree = body.aria_snapshot()
+        screenshot = self.page.screenshot()
+
+        if "No such member" in body_text:
+            screen = "not_found"
+        elif path.startswith("/core-banking/member"):
+            screen = "detail"
+        else:
+            screen = "search"
+
+        fields: dict[str, str] = {}
+        controls: dict[str, str] = {}
+
+        if screen == "detail":
+            # Every two-cell table row is "label -> value". Slugifying the
+            # label ("Savings Balance" -> "savings_balance") is what lines
+            # these up with the field names a recipe's outputs/checkpoints
+            # expect, with no per-field parsing code.
+            for row in self.page.locator("table tr").all():
+                cells = row.locator("td").all()
+                if len(cells) == 2:
+                    label = cells[0].inner_text().strip()
+                    value = cells[1].inner_text().strip()
+                    fields[label.lower().replace(" ", "_")] = value
+        elif screen == "not_found":
+            controls["message"] = body_text.strip()
+        else:  # search
+            box = self.page.locator('input[name="member_id"]')
+            controls["search_box"] = box.input_value() if box.count() else ""
+            controls["search_button"] = "Search"
+
+        return Observation(screen=screen, controls=controls, fields=fields,
+                           accessibility_tree=tree, screenshot=screenshot)
+
+    # -- act --------------------------------------------------------------
+
+    def act(self, action: str, target: Optional[list[Locator]] = None,
+            value: Optional[str] = None) -> ActionResult:
+        if action == "navigate":
+            url = value or (target[0].value if target else self.base_url)
+            if url.startswith("/"):
+                url = self.base_url + url
+            self.page.goto(url, wait_until="load")
+            return ActionResult(True)
+
+        if action == "wait":
+            self.page.wait_for_load_state("load")
+            return ActionResult(True)
+
+        if not target:
+            return ActionResult(False, f"no locator ladder given for '{action}'")
+
+        found, rung, strategy = self._resolve(target)
+        label = self._ladder_label(target)
+        self.rung_log.append({"control": label, "rung": rung,
+                              "strategy": strategy, "ok": found is not None})
+        if found is None:
+            logger.warning("locator ladder exhausted for %r", label)
+            return ActionResult(False, f"no rung resolved for {label}")
+        logger.info("%r resolved via rung %d (%s)", label, rung, strategy)
+
+        if action == "type":
+            found.fill(value or "")
+            return ActionResult(True)
+        if action == "click":
+            found.click()
+            self.page.wait_for_load_state("load")
+            return ActionResult(True)
+        if action == "read":
+            found.wait_for(state="visible")
+            return ActionResult(True, note=found.inner_text())
+        return ActionResult(False, f"unsupported action '{action}'")
+
+    # -- locator ladder ---------------------------------------------------
+
+    def _resolve(self, target: list[Locator]):
+        """Try each locator top-down. Returns (playwright-locator-like,
+        rung number, strategy) for the first one that actually exists on the
+        page, or (None, None, None) if the whole ladder is exhausted.
+        """
+        for rung, loc in enumerate(target, start=1):
+            found = self._try_strategy(loc)
+            if found is not None:
+                return found, rung, loc.strategy
+        return None, None, None
+
+    def _try_strategy(self, loc: Locator):
+        try:
+            if loc.strategy == "role_name":
+                role, _, name = loc.value.partition("::")
+                pl = (self.page.get_by_role(role, name=name, exact=True)
+                      if name else self.page.get_by_role(role))
+            elif loc.strategy == "attribute":
+                pl = self.page.locator(loc.value)
+            elif loc.strategy == "label_anchor":
+                # Nearby-label anchor: find the <td> with this exact text,
+                # then read its sibling cell in the same row. There is no
+                # accessible-name or attribute link for this on a legacy
+                # table page — position relative to a label is all we get.
+                safe = loc.value.replace('"', '\\"')
+                pl = self.page.locator(
+                    f'xpath=//td[normalize-space(text())="{safe}"]'
+                    f"/following-sibling::td[1]")
+            elif loc.strategy == "coordinates":
+                return _CoordinateTarget(self.page, loc.value)
+            else:
+                return None
+            return pl if pl.count() > 0 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ladder_label(target: list[Locator]) -> str:
+        """Best-effort human label for logging, drawn from whichever rung
+        carries a readable name. Doesn't affect resolution, only the log.
+        """
+        for loc in target:
+            if loc.strategy == "role_name" and "::" in loc.value:
+                return loc.value.split("::", 1)[1]
+            if loc.strategy == "label_anchor":
+                return loc.value
+        return target[0].value if target else "?"

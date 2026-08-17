@@ -2,3 +2,4 @@ fastapi
 pydantic>=2
 uvicorn
 httpx
+playwright   # real WebDriver only; core service still runs without it via FakeBankDriver
