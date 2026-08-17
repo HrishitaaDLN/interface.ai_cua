@@ -47,3 +47,19 @@ def test_replay_hidden_balance_is_failure_naming_the_step():
     assert isinstance(result, Failure)
     assert result.step == "s3"
     assert result.expected == "field:savings_balance"
+
+
+def test_replay_recovers_from_slow_load_after_bounded_retries():
+    """A transient slow load is not a hard failure: the checkpoint just
+    needs a few bounded extra chances to become true. Within that bound
+    (slow_turns=2 < MAX_SLOW_RETRIES=3), the run must still succeed, and
+    the recovery must be visible on the result, not silently swallowed."""
+    result = replay(_artifact(), {"member_id": "12345"},
+                    FakeBankDriver(slow_turns=2), gate)
+
+    assert isinstance(result, Success)
+    assert result.outputs == {"savings_balance": "$4,210.55"}
+    assert len(result.recovered) == 1
+    assert result.recovered[0].step == "s2"
+    assert result.recovered[0].condition == "slow_load"
+    assert result.recovered[0].attempts == 2

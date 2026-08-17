@@ -48,6 +48,17 @@ class KnownOutcome(BaseModel):
     returns: str         # status name handed back to the caller
 
 
+class Interstitial(BaseModel):
+    """A recognized dismissable overlay (e.g. a cookie banner or a stray
+    dialog), not a business outcome and not a failure. replay.py dismisses
+    it and keeps going, bounded to a small number of times per run.
+    """
+    name: str            # e.g. "session_dialog"
+    detect: str          # same checkpoint syntax as KnownOutcome.detect
+    dismiss: list[Locator] = Field(default_factory=list)
+    dismiss_action: str = "click"
+
+
 class ApprovalState(str, Enum):
     draft = "draft"
     approved = "approved"
@@ -64,6 +75,7 @@ class CapabilityArtifact(BaseModel):
     steps: list[Step] = Field(default_factory=list)
     success: str                              # the goal checkpoint
     known_outcomes: list[KnownOutcome] = Field(default_factory=list)
+    known_interstitials: list[Interstitial] = Field(default_factory=list)
     redaction: list[str] = Field(default_factory=list)
     approval_state: ApprovalState = ApprovalState.draft
     provenance: dict[str, str] = Field(default_factory=dict)  # never the transcript
@@ -72,17 +84,31 @@ class CapabilityArtifact(BaseModel):
 # ---- result contract -------------------------------------------------------
 # Every run returns exactly ONE of these three. This is what stops a real
 # business answer ("no such member") from being mistaken for a crash.
+#
+# "Recoverable" (a transient slow load, a dismissed interstitial) is NOT a
+# fourth status. It is a mid-run condition replay.py handles inline, within
+# a small bounded number of retries, before deciding one of the three
+# outcomes below. `recovered` is the visible record that it happened, kept
+# on whichever outcome the run actually ended in.
+
+class RecoveredEvent(BaseModel):
+    step: str             # step id this happened during, or "success"
+    condition: str        # "slow_load" or "interstitial:<name>"
+    attempts: int         # bounded; never open-ended
+
 
 class Success(BaseModel):
     status: Literal["success"] = "success"
     outputs: dict[str, Any]
     run_id: str
+    recovered: list[RecoveredEvent] = Field(default_factory=list)
 
 
 class BusinessOutcome(BaseModel):
     status: Literal["business_outcome"] = "business_outcome"
     name: str
     run_id: str
+    recovered: list[RecoveredEvent] = Field(default_factory=list)
 
 
 class Failure(BaseModel):
@@ -91,6 +117,7 @@ class Failure(BaseModel):
     expected: str
     observed: str
     run_id: str
+    recovered: list[RecoveredEvent] = Field(default_factory=list)
 
 
 Result = Success | BusinessOutcome | Failure

@@ -51,11 +51,13 @@ MEMBERS = {
 class FakeBankDriver:
     """A search -> detail flow. Inject failures via the flags below."""
 
-    def __init__(self, hide_balance: bool = False):
+    def __init__(self, hide_balance: bool = False, slow_turns: int = 0):
         self.screen = "search"
         self.query = ""
         self.current: Optional[str] = None
         self.hide_balance = hide_balance
+        self.slow_turns = slow_turns          # perceive()s the detail screen
+        self._slow_remaining = 0              # stays "loading" for, before settling
 
     def _resolve(self, target: Optional[list[Locator]]) -> str:
         # A real driver walks the ladder against the live surface. Here we
@@ -70,6 +72,8 @@ class FakeBankDriver:
         if self.screen == "not_found":
             return Observation(screen="not_found",
                                controls={"message": "No such member"})
+        if self._slow_remaining > 0:
+            return Observation(screen="loading", controls={})
         # detail screen
         m = MEMBERS[self.current]  # type: ignore[index]
         fields = {"member_id": self.current, "name": m["name"]}
@@ -87,10 +91,15 @@ class FakeBankDriver:
         if action == "click" and name == "search_button":
             if self.query in MEMBERS:
                 self.current, self.screen = self.query, "detail"
+                self._slow_remaining = self.slow_turns
             else:
                 self.screen = "not_found"
             return ActionResult(True)
-        if action in ("read", "wait"):
+        if action == "wait":
+            if self._slow_remaining > 0:
+                self._slow_remaining -= 1
+            return ActionResult(True)
+        if action == "read":
             return ActionResult(True)
         return ActionResult(False, f"unknown action {action} on {name}")
 
@@ -105,6 +114,11 @@ class FakeBankDriver:
 #   attribute    a CSS selector                e.g. 'input[name="member_id"]'
 #   label_anchor the exact text of a nearby <td> label, e.g. "Savings Balance"
 #   coordinates  "<x>,<y>" page coordinates, e.g. "245,59"
+
+# One short, bounded chance per attempt for an in-flight navigation to
+# settle. Never the whole wait by itself -- replay.py's recoverable-retry
+# loop is what decides whether to ask for another one or give up.
+NAV_ATTEMPT_TIMEOUT_MS = 1200
 
 
 class _CoordinateTarget:
@@ -210,7 +224,7 @@ class PlaywrightBankDriver:
             return ActionResult(True)
 
         if action == "wait":
-            self.page.wait_for_load_state("load")
+            self._wait_briefly_for_navigation()
             return ActionResult(True)
 
         if not target:
@@ -229,13 +243,30 @@ class PlaywrightBankDriver:
             found.fill(value or "")
             return ActionResult(True)
         if action == "click":
-            found.click()
-            self.page.wait_for_load_state("load")
+            # no_wait_after: the click itself is mechanical and always
+            # succeeds. Whether the page it triggers has finished settling
+            # is a separate, bounded question -- replay.py's recoverable
+            # retry loop is what decides how many more short chances to
+            # give it before treating it as a hard failure.
+            found.click(no_wait_after=True)
+            self._wait_briefly_for_navigation()
             return ActionResult(True)
         if action == "read":
             found.wait_for(state="visible")
             return ActionResult(True, note=found.inner_text())
         return ActionResult(False, f"unsupported action '{action}'")
+
+    def _wait_briefly_for_navigation(self) -> None:
+        """One short, bounded wait for a navigation to complete. Times out
+        quietly rather than raising -- a bounded miss here is normal and
+        expected, not an error; the caller decides what to do about it.
+        """
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        try:
+            with self.page.expect_navigation(timeout=NAV_ATTEMPT_TIMEOUT_MS):
+                pass
+        except PlaywrightTimeoutError:
+            pass
 
     # -- locator ladder ---------------------------------------------------
 
