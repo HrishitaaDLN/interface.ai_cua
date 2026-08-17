@@ -10,6 +10,8 @@ Two drivers implement it. `FakeBankDriver` simulates the bank app in memory, no 
 
 Discovery and replay are two modes on the same driver interface, not two systems. Discovery (`app/discovery.py`) is a live observe, decide, act loop driven by a vision model, which compiles what it did into a draft artifact. Replay (`app/replay.py`) walks an approved artifact's steps with no model involved. Discovery is rare and expensive; replay is what runs in production. The design keeps the model out of the replay path entirely.
 
+A few decisions were made against real alternatives. One process instead of services: the brief penalizes premature scaling infrastructure, and nothing here needs independent scaling yet. A direct model call instead of an agent framework: this keeps full control of the stopping logic, and every line of that logic has to be defended, which a framework's internals make harder to do. An accessibility tree plus a screenshot instead of pure coordinates: coordinates alone break the moment the page has no clean DOM to anchor to, which is exactly the legacy case this system targets.
+
 ## Artifact schema
 
 The artifact (`CapabilityArtifact`, `app/models.py`) is a typed contract, not a click recording.
@@ -26,7 +28,7 @@ Each step carries a locator ladder: role and accessible name first, then an attr
 
 ## Determinism & error handling
 
-Replay has no branch that depends on guessing. Every step resolves through the ladder or it does not, and the ladder logs which rung matched (`driver.rung_log`), which is a drift signal: a step that used to resolve on rung 1 and starts resolving on rung 3 means the page changed underneath a recipe that still technically works. In step 5, replay resolved the same three steps on the same rungs discovery did (rung 2, rung 3, rung 3), the concrete evidence the ladder is deterministic.
+Replay has no branch that depends on a model deciding at runtime. Every step resolves through the ladder or it does not, and the ladder logs which rung matched (`driver.rung_log`), which is a drift signal: a step that used to resolve on rung 1 and starts resolving on rung 3 means the page changed underneath a recipe that still technically works. In step 5, replay resolved the same three steps on the same rungs discovery did (rung 2, rung 3, rung 3), the concrete evidence the ladder is deterministic.
 
 All waiting is condition-based: Playwright's own actionability waits and `wait_for_load_state()`, never `time.sleep()`. The page's injected 3-second slow-load delay was absorbed correctly with zero manual sleeps in the driver.
 
@@ -61,7 +63,7 @@ The mechanism is real. The UI around it is not.
 
 What is mocked is everything a human would see: there is no dashboard showing a paused run or a takeover button. The state machine and endpoints are real and tested directly; the console a human would use is not built.
 
-Resume is mostly a property of the schema: every step has `retry_safe`, meaning it can be safely re-run if a process picks back up mid-run. Nothing currently exercises an actual resume after a handoff; the field exists and the intent is documented, but it is untested.
+Resume is mostly a property of the schema: every step has `retry_safe`, meaning it can be safely re-run if a process picks back up mid-run. The control-token transfer itself is real and tested. Pausing a live in-flight Playwright run and resuming it on the same session is designed, not exercised: nothing in this project has actually demonstrated a same-session resume.
 
 ## Safety
 
@@ -73,7 +75,7 @@ As noted above, `value_from` binding means no literal a recipe types ever gets f
 
 Secrets are out of band. The model API key is read from an environment variable, loaded from a gitignored `.env` file, never logged or written into evidence. This was a real constraint, not theoretical: two different keys were used during discovery and neither was ever echoed into a shell command or a file outside `.env`.
 
-Honest limits: the card and account regexes are reasonable heuristics, not a full PII scanner. They can miss unusual formats and could over-redact a long benign digit string. Screenshots are the sneakiest leak in this design; only one is tracked in this repo, from the discovery run, kept only because the data on it is fake. In production, screenshots should be redacted or withheld, which the README now says explicitly.
+Honest limits: the card and account regexes are reasonable heuristics, not a full PII scanner. They can miss unusual formats and could over-redact a long benign digit string. Screenshots are the sneakiest leak in this design; only one is tracked in this repo, from the discovery run, kept only because the data on it is fake. In production, screenshots should be redacted or withheld, which the README now says explicitly. The allowlist and redaction protect data and actions during replay, but discovery still has a model clicking freely on a live page. Risky actions are gated even during discovery, through the same `SafetyGate`, but discovery is meant to run against sandboxed or non-production instances only.
 
 ## Cuts
 
