@@ -1,5 +1,5 @@
 {
-  "scenario": "success",
+  "scenario": "recoverable",
   "capability": "lookup_savings",
   "inputs": {
     "member_id": "12345"
@@ -9,8 +9,14 @@
     "outputs": {
       "savings_balance": "$4,210.55"
     },
-    "run_id": "<redacted>",
-    "recovered": []
+    "run_id": "df5f28bf",
+    "recovered": [
+      {
+        "step": "d2",
+        "condition": "slow_load",
+        "attempts": 1
+      }
+    ]
   },
   "steps_executed": [
     {

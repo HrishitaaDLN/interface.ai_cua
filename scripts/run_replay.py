@@ -2,10 +2,11 @@
 completely unmodified -- pointed at PlaywrightBankDriver against the live
 legacy bank page. No LLM anywhere in this file or in replay.py.
 
-Three real runs, each producing one of the three result contracts:
+Four real runs:
   1. member 12345                    -> success
   2. member 99999                    -> business_outcome (member_not_found)
-  3. member 12345 + hide_balance=1   -> failure, naming the exact step
+  3. member 12345 + slow=1           -> success, after a bounded retry
+  4. member 12345 + hide_balance=1   -> failure, naming the exact step
 
 Every run uses the SAME driver class and the SAME locator ladders the
 approved artifact recorded from discovery. Each step's resolved rung is
@@ -114,6 +115,7 @@ def main() -> None:
     entry = artifact.target["entry_point"]
     _run("success", artifact, "12345", entry)
     _run("business-outcome", artifact, "99999", entry)
+    _run("recoverable", artifact, "12345", f"{entry}?slow=1")
     _run("failure", artifact, "12345", f"{entry}?hide_balance=1")
 
 
