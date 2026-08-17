@@ -30,7 +30,7 @@
       "target": [
         {
           "strategy": "role_name",
-          "value": "textbox::the textbox"
+          "value": "textbox::the Member ID text box"
         },
         {
           "strategy": "role_name",
@@ -68,11 +68,11 @@
       "target": [
         {
           "strategy": "role_name",
-          "value": "cell::the Savings Balance"
+          "value": "cell::the savings balance"
         },
         {
           "strategy": "attribute",
-          "value": "[aria-label=\"the Savings Balance\"]"
+          "value": "[aria-label=\"the savings balance\"]"
         },
         {
           "strategy": "label_anchor",
@@ -92,6 +92,7 @@
       "returns": "member_not_found"
     }
   ],
+  "known_interstitials": [],
   "redaction": [],
   "approval_state": "approved",
   "provenance": {

@@ -12,6 +12,14 @@ Discovery and replay are two modes on the same driver interface, not two systems
 
 A few decisions were made against real alternatives. One process instead of services: the brief penalizes premature scaling infrastructure, and nothing here needs independent scaling yet. A direct model call instead of an agent framework: this keeps full control of the stopping logic, and every line of that logic has to be defended, which a framework's internals make harder to do. An accessibility tree plus a screenshot instead of pure coordinates: coordinates alone break the moment the page has no clean DOM to anchor to, which is exactly the legacy case this system targets.
 
+Observability here is the structured step logs plus the failure screenshot (see evidence/), not a separate metrics or tracing layer. That was a deliberate choice, not an oversight: the brief discourages premature infrastructure, and a metrics/tracing stack has nothing to attach to yet with a single process and no production traffic.
+
+The FastAPI service (`app/main.py`) is the front door: the boundary between a calling agent and everything underneath it. An agent does not see the driver, the safety gate, or the replay engine directly; it sees a catalog of named, typed capabilities it discovers, approves, and invokes by name over HTTP. Everything below that catalog interface is hidden from the caller. That is what makes this a capability an agent calls, not a script a human runs by hand.
+
+The live session also has exactly one holder at a time, agent, replay, or human, tracked by a control token. That single-holder rule is itself part of the architecture, not just a detail of the escalation mechanism: it is how the system always knows who is currently allowed to act. The Escalation & handoff section covers how the token moves.
+
+Two persistence boundaries sit behind their own narrow interfaces as well: capabilities persist through an artifact store and run evidence persists through an evidence store. Today both are simple (an in-memory dict for the demo service's artifact store, plain JSON and screenshot files under evidence/ for run evidence), but the interface is what callers depend on, so either backend could change without touching the logic above.
+
 ## Artifact schema
 
 The artifact (`CapabilityArtifact`, `app/models.py`) is a typed contract, not a click recording.
@@ -36,6 +44,8 @@ The three-way result contract (`Success`, `BusinessOutcome`, `Failure`) is the m
 - Member 12345 replayed to `success`, with `savings_balance: "$4,210.55"` actually present in `outputs`, not just a passing checkpoint.
 - Member 99999 replayed to `business_outcome: member_not_found`, not a failure. `replay.py` checks `known_outcomes` before a step's own checkpoint, so the not-found branch and the happy-path checkpoint on the same click step never collide.
 - Member 12345 with the page's hidden-balance switch on replayed to `failure`, naming the exact step (`d3`), what was expected (`field:savings_balance`), and what was observed (`screen=detail`). The ladder independently exhausted all three rungs on that step too, agreeing with the checkpoint.
+
+Now that all three are built, the full taxonomy replay classifies anything into is: recoverable (a transient slow load or a dismissable interstitial, given a few bounded retries before anything is decided), business outcome (a real, valid answer that is not what was asked for, like member not found), and hard failure (a genuine stuck state, naming the exact step). A permission denial on the page would classify as a business outcome, since it is a real answer the system gave, not a crash. An unexpected dialog blocking the page would classify as recoverable, since it is exactly what known_interstitials exists to dismiss and retry past.
 
 Two real bugs surfaced during discovery, worth stating plainly since they are the actual argument for testing against a live surface instead of trusting the design on paper.
 
@@ -79,7 +89,7 @@ Honest limits: the card and account regexes are reasonable heuristics, not a ful
 
 ## Cuts
 
-Built and run for real: the artifact schema, the deterministic replay engine, the three-way result contract, the safety gate, the locator ladder with rung logging, the real Playwright driver, one genuine discovery run to a success outcome and one to a business outcome, the merge of two discovery drafts into one approved recipe, and three real replay runs against the live page.
+Built and run for real: the artifact schema, the deterministic replay engine, the three-way result contract, the safety gate, the locator ladder with rung logging, the real Playwright driver, one genuine discovery run to a success outcome and one to a business outcome, the merge of two discovery drafts into one approved recipe, and real replay runs against the live page covering all four states. The draft to approved lifecycle, the confidence and approval stretch goal, is also already implemented and enforced, not just designed: a draft cannot be invoked, and only a human moving it to approved unlocks that, tested directly.
 
 Stubbed or design-only:
 
@@ -87,6 +97,7 @@ Stubbed or design-only:
 - Multi-tenant reuse. The schema has the right shape, but no per-tenant binding resolution exists.
 - The operator dashboard for handoff. The state machine is real; the UI is not built.
 - Retry and resume after a handoff. `retry_safe` exists on every step but nothing exercises an actual resume.
-- Verifying a recipe by replaying it repeatedly proves little on a static local app, since nothing on the page changes between runs. The three replay runs prove the mechanism works, not that the recipe survives a real app changing over time.
+- Interstitial dismissal (a recognized dismissable overlay gets clicked through and the run continues) is built into replay.py the same way the slow-load retry is, but this project's page has no such overlay to exercise it against, so unlike the slow-load path it is untested by real evidence.
+- Verifying a recipe by replaying it repeatedly proves little on a static local app, since nothing on the page changes between runs. The replay runs prove the mechanism works, not that the recipe survives a real app changing over time.
 
 Next, in order: a second, structurally different driver, to actually test the heterogeneity claim instead of asserting it; a minimal operator view for handoff, even a plain page with pending requests and a takeover button, to make the mechanism demonstrable end to end; and a second discovery-to-approval cycle against a page that changes between runs, to see whether rung drift catches something real instead of only being exercised against a static one.

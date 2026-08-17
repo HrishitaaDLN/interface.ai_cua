@@ -9,11 +9,11 @@
       "observed_screen": "search",
       "model_decided": {
         "action": "type",
-        "target_description": "the textbox",
+        "target_description": "the Member ID text box",
         "value": "12345"
       },
       "ladder_tried": [
-        "role_name=textbox::the textbox",
+        "role_name=textbox::the Member ID text box",
         "role_name=textbox::"
       ],
       "resolved_rung": 2,
@@ -46,12 +46,12 @@
       "observed_screen": "detail",
       "model_decided": {
         "action": "read",
-        "target_description": "the Savings Balance",
+        "target_description": "the savings balance",
         "value": null
       },
       "ladder_tried": [
-        "role_name=cell::the Savings Balance",
-        "attribute=[aria-label=\"the Savings Balance\"]",
+        "role_name=cell::the savings balance",
+        "attribute=[aria-label=\"the savings balance\"]",
         "label_anchor=Savings Balance"
       ],
       "resolved_rung": 3,

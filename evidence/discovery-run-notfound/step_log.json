@@ -32,12 +32,12 @@
       "observed_screen": "search",
       "model_decided": {
         "action": "click",
-        "target_description": "Search button",
+        "target_description": "the Search button",
         "value": null
       },
       "ladder_tried": [
-        "role_name=button::Search button",
-        "role_name=link::Search button",
+        "role_name=button::the Search button",
+        "role_name=link::the Search button",
         "role_name=button::"
       ],
       "resolved_rung": 3,
@@ -51,7 +51,7 @@
       "observed_screen": "not_found",
       "model_decided": {
         "action": "outcome",
-        "target_description": "The page says \"No such member: 99999\".",
+        "target_description": "The page says \"No such member: 99999\"",
         "value": null
       },
       "ladder_tried": [],

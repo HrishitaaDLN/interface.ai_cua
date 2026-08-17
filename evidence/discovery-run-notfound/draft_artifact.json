@@ -41,11 +41,11 @@
       "target": [
         {
           "strategy": "role_name",
-          "value": "button::Search button"
+          "value": "button::the Search button"
         },
         {
           "strategy": "role_name",
-          "value": "link::Search button"
+          "value": "link::the Search button"
         },
         {
           "strategy": "role_name",
@@ -65,6 +65,7 @@
       "returns": "member_not_found"
     }
   ],
+  "known_interstitials": [],
   "redaction": [],
   "approval_state": "draft",
   "provenance": {
