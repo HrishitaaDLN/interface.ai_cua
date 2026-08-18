@@ -8,6 +8,13 @@ fresh browser, fixes the page in that exact session. Replay then RESUMES
 from the step it paused on, re-reading current state via perceive(), not
 restarting from the top, and reaches success.
 
+"Same session" is not just asserted in prose here. Chrome's own CDP debug
+endpoint (http://localhost:<port>/json) assigns each open tab a target id;
+this script and the separate human-action process both read and record it,
+so evidence/handoff/before_handoff.json, human_action.json, and
+after_resume.json can be compared directly: same session_id and same
+run_id across all three is what proves continuity, not a claim.
+
 Precondition: the legacy bank server must already be running:
     uvicorn legacy_bank.server:app --port 8080
 
@@ -17,6 +24,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,11 +38,15 @@ from app.replay import replay
 from app.safety import SafetyGate, redaction_keys_from_artifact
 
 ARTIFACT_PATH = ROOT / "evidence" / "approved-recipe" / "lookup_savings.json"
-OUT_DIR = ROOT / "evidence" / "handoff-resume"
+OUT_DIR = ROOT / "evidence" / "handoff"
 CDP_PORT = 9222
 
 gate = SafetyGate(allowed_actions={"type", "click", "read", "wait", "navigate"},
                   redact_keys={"ssn", "password", "token"})
+
+
+def _write(name: str, data: dict) -> None:
+    (OUT_DIR / name).write_text(json.dumps(data, indent=2))
 
 
 def main() -> None:
@@ -58,7 +70,6 @@ def main() -> None:
         raised_handoffs.append(context)
 
     driver = PlaywrightBankDriver(headless=True, remote_debug_port=CDP_PORT)
-    log: dict = {"capability": artifact.name, "inputs": {"member_id": member_id}}
 
     try:
         # 1. Drive into the stuck state and pause on it, same session.
@@ -72,10 +83,26 @@ def main() -> None:
                 f"{getattr(paused, 'status', '?')!r} instead -- not forcing "
                 f"a resume demo on a run that did not actually pause")
 
-        log["pause"] = json.loads(paused.model_dump_json())
-        log["handoff_request"] = raised_handoffs[-1] if raised_handoffs else None
-        print("--- paused ---")
-        print(paused.model_dump_json(indent=2))
+        completed_before = [s.id for s in artifact.steps[:paused.resume.step_index]]
+        session_id_before = driver.cdp_session_id()
+        rung_log_before = list(driver.rung_log)
+
+        before_handoff = {
+            "run_id": paused.run_id,
+            "session_id": session_id_before,
+            "cdp_port": CDP_PORT,
+            "capability": artifact.name,
+            "inputs": {"member_id": member_id},
+            "completed_steps": completed_before,
+            "paused_at_step": paused.step,
+            "reason": paused.reason,
+            "handoff_request": raised_handoffs[-1] if raised_handoffs else None,
+            "rung_log": rung_log_before,
+        }
+        _write("before_handoff.json", gate.redact(
+            before_handoff, extra_keys=redaction_keys_from_artifact(artifact.redaction)))
+        print("--- before_handoff ---")
+        print(json.dumps(before_handoff, indent=2))
 
         # 2. The human step: a separate OS process attaches to the SAME
         # live browser over CDP (not a fresh one) and fixes the page.
@@ -84,24 +111,52 @@ def main() -> None:
             [sys.executable, str(ROOT / "scripts" / "simulated_human_action.py"),
              str(CDP_PORT), fix_url],
             capture_output=True, text=True, timeout=30)
-        print("\n--- human action (separate process, over CDP) ---")
-        print(human.stdout.strip())
         if human.returncode != 0:
             raise SystemExit(f"human action process failed:\n{human.stderr}")
-        log["human_action"] = {
-            "note": ("a separate process attached over CDP to the paused "
-                    "session and navigated the same live tab to the "
-                    "detail page without hide_balance"),
-            "process_output": human.stdout.strip(),
+
+        match = re.search(r"HUMAN_ACTION_JSON:(\{.*\})", human.stdout)
+        human_json = json.loads(match.group(1)) if match else {}
+        session_id_seen_by_human = human_json.get("session_id")
+
+        human_action = {
+            "run_id": paused.run_id,
+            "session_id_seen_by_human_process": session_id_seen_by_human,
+            "matches_before_handoff_session_id": (
+                session_id_seen_by_human == session_id_before
+                if session_id_before else None),
+            "process": "genuinely separate OS process (subprocess.run), "
+                       "attached over CDP, not a function call",
+            "before_url": human_json.get("before_url"),
+            "after_url": human_json.get("after_url"),
+            "raw_stdout": human.stdout.strip(),
         }
+        _write("human_action.json", human_action)
+        print("\n--- human_action ---")
+        print(json.dumps(human_action, indent=2))
 
         # 3. Resume: same driver, same session, picks up at the paused step.
         result = replay(artifact, {"member_id": member_id}, driver, gate,
                         on_stuck=on_stuck, resumable=True, resume=paused.resume)
-        log["resume_result"] = json.loads(result.model_dump_json())
-        log["rung_log_full_run"] = driver.rung_log
-        print("\n--- resumed ---")
-        print(result.model_dump_json(indent=2))
+        session_id_after = driver.cdp_session_id()
+        rung_log_after = driver.rung_log[len(rung_log_before):]
+
+        after_resume = {
+            "run_id": result.run_id,
+            "session_id": session_id_after,
+            "same_run_as_before_handoff": result.run_id == paused.run_id,
+            "same_session_as_before_handoff": (
+                session_id_after == session_id_before
+                if session_id_before else None),
+            "resumed_from_step": paused.step,
+            "resumed_from_step_index": paused.resume.step_index,
+            "completed_steps_this_phase": [
+                s.id for s in artifact.steps[paused.resume.step_index:]],
+            "final_result": json.loads(result.model_dump_json()),
+            "rung_log": rung_log_after,
+        }
+        _write("after_resume.json", after_resume)
+        print("\n--- after_resume ---")
+        print(json.dumps(after_resume, indent=2))
 
         if result.status != "success":
             raise SystemExit(
@@ -111,9 +166,11 @@ def main() -> None:
     finally:
         driver.close()
 
-    step_log = gate.redact(log, extra_keys=redaction_keys_from_artifact(artifact.redaction))
-    (OUT_DIR / "step_log.json").write_text(json.dumps(step_log, indent=2))
     print(f"\nevidence written to: {OUT_DIR}")
+    print(f"same session proven by: session_id "
+         f"{session_id_before!r} == {session_id_seen_by_human!r} == "
+         f"{session_id_after!r}")
+    print(f"same run proven by: run_id {paused.run_id!r} == {result.run_id!r}")
 
 
 if __name__ == "__main__":

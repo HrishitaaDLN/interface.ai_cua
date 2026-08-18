@@ -1,0 +1,48 @@
+{
+  "run_id": "707c66aa",
+  "session_id": "3325A752A6F0EA6A8274DCD2C1F026D0",
+  "cdp_port": 9222,
+  "capability": "lookup_savings",
+  "inputs": {
+    "member_id": "12345"
+  },
+  "completed_steps": [
+    "d1",
+    "d2"
+  ],
+  "paused_at_step": "d3",
+  "reason": "expected field:savings_balance, observed screen=detail",
+  "handoff_request": {
+    "capability": "lookup_savings",
+    "step": "d3",
+    "reason": "expected field:savings_balance, observed screen=detail",
+    "snapshot": {
+      "screen": "detail",
+      "fields": {
+        "member_id": "12345",
+        "name": "Ada Lovelace"
+      },
+      "screenshot_path": "evidence\\handoff\\pause_screenshot.png"
+    }
+  },
+  "rung_log": [
+    {
+      "control": "the Member ID text box",
+      "rung": 2,
+      "strategy": "role_name",
+      "ok": true
+    },
+    {
+      "control": "Search button",
+      "rung": 3,
+      "strategy": "role_name",
+      "ok": true
+    },
+    {
+      "control": "the savings balance",
+      "rung": null,
+      "strategy": null,
+      "ok": false
+    }
+  ]
+}

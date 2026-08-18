@@ -1,0 +1,9 @@
+{
+  "run_id": "707c66aa",
+  "session_id_seen_by_human_process": "3325A752A6F0EA6A8274DCD2C1F026D0",
+  "matches_before_handoff_session_id": true,
+  "process": "genuinely separate OS process (subprocess.run), attached over CDP, not a function call",
+  "before_url": "http://localhost:8080/core-banking/member?member_id=12345&slow=0&hide_balance=1",
+  "after_url": "http://localhost:8080/core-banking/member?member_id=12345",
+  "raw_stdout": "human attached to the paused session, was on: http://localhost:8080/core-banking/member?member_id=12345&slow=0&hide_balance=1\nhuman action complete, now on: http://localhost:8080/core-banking/member?member_id=12345\nHUMAN_ACTION_JSON:{\"session_id\": \"3325A752A6F0EA6A8274DCD2C1F026D0\", \"before_url\": \"http://localhost:8080/core-banking/member?member_id=12345&slow=0&hide_balance=1\", \"after_url\": \"http://localhost:8080/core-banking/member?member_id=12345\"}"
+}

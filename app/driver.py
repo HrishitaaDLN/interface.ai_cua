@@ -170,6 +170,23 @@ class PlaywrightBankDriver:
         self._browser = self._pw.chromium.launch(headless=headless, args=args)
         self.page = self._browser.new_page()
         self.rung_log: list[dict] = []  # which ladder rung matched, in order
+        self.remote_debug_port = remote_debug_port
+
+    def cdp_session_id(self) -> Optional[str]:
+        """The browser's own CDP target id for this page, not something
+        this project invents. Fetched from Chrome's debug HTTP endpoint
+        (http://localhost:<port>/json). Two evidence files that quote the
+        SAME id are provably talking about the same live tab, not just
+        claiming to. Returns None if remote_debug_port wasn't set.
+        """
+        if not self.remote_debug_port:
+            return None
+        import httpx
+        targets = httpx.get(f"http://localhost:{self.remote_debug_port}/json").json()
+        for t in targets:
+            if t.get("type") == "page" and t.get("url") == self.page.url:
+                return t.get("id")
+        return targets[0].get("id") if targets else None
 
     def close(self) -> None:
         self._browser.close()

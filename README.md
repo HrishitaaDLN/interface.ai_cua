@@ -39,11 +39,19 @@ python scripts/run_replay.py
 #   -> four real runs, each saved under evidence/replay-<scenario>/:
 #      success, business_outcome, recoverable (bounded retry then success),
 #      and hard failure (which also auto-raises a handoff request)
+
+# (c) same-session human handoff: pauses on a live stuck state without
+# closing the browser, a separate process fixes the page over CDP, replay
+# resumes from the paused step (not from the top) and reaches success
+python scripts/run_handoff_resume.py
+#   -> evidence/handoff/before_handoff.json, human_action.json,
+#      after_resume.json -- same CDP session id and same run id recorded
+#      across all three, proving one continuous session, not three claims
 ```
 
 Every command above was run fresh to verify this README, including the two
-discovery runs (real Gemini calls) and all four replay scenarios (real
-Playwright against the live page).
+discovery runs (real Gemini calls), all four replay scenarios, and the
+handoff/resume demo (all three real Playwright against the live page).
 
 ## Demo path B: without live services (keyless, no browser, no model)
 
@@ -94,12 +102,15 @@ this README.
 - Real: the artifact schema, the deterministic replay engine, the three-way
   result contract with a bounded recoverable path in front of it, the safety
   gate (allowlist + field and content redaction), the handoff token state
-  machine (now auto-raised on a hard failure, not just manual), the callable
+  machine (auto-raised on a hard failure, not just manual), same-session
+  pause and resume on a real stuck state (`evidence/handoff/`), the callable
   catalog.
 - Stubbed at a clean seam: discovery (a real LLM-driven run plugs into
   `fake_discovery`) and the surface (`FakeBankDriver` stands in for the real
   `PlaywrightBankDriver`). Both sit behind interfaces so swapping them
-  changes nothing above.
+  changes nothing above. The operator UI a human would use during a handoff
+  is also stubbed: this demo has a human attach their own CDP tooling
+  directly to the paused session instead.
 
 In production, screenshots are redacted or withheld entirely (see
 "Screenshots are the sneaky leak" in `FINAL-DESIGN-AND-STACK.md`). The one

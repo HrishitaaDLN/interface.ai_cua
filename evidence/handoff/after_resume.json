@@ -1,0 +1,27 @@
+{
+  "run_id": "707c66aa",
+  "session_id": "3325A752A6F0EA6A8274DCD2C1F026D0",
+  "same_run_as_before_handoff": true,
+  "same_session_as_before_handoff": true,
+  "resumed_from_step": "d3",
+  "resumed_from_step_index": 2,
+  "completed_steps_this_phase": [
+    "d3"
+  ],
+  "final_result": {
+    "status": "success",
+    "outputs": {
+      "savings_balance": "$4,210.55"
+    },
+    "run_id": "707c66aa",
+    "recovered": []
+  },
+  "rung_log": [
+    {
+      "control": "the savings balance",
+      "rung": 3,
+      "strategy": "label_anchor",
+      "ok": true
+    }
+  ]
+}

@@ -73,7 +73,7 @@ The mechanism is real. The UI around it is not.
 
 What is mocked is everything a human would see: there is no dashboard showing a paused run or a takeover button. The state machine and endpoints are real and tested directly; the console a human would use is not built.
 
-Resume is mostly a property of the schema: every step has `retry_safe`, meaning it can be safely re-run if a process picks back up mid-run. The control-token transfer itself is real and tested. Pausing a live in-flight Playwright run and resuming it on the same session is designed, not exercised: nothing in this project has actually demonstrated a same-session resume.
+Resume is real, not just designed. `replay()` accepts a resume state that picks a paused run back up at the exact step it stopped on, on the same driver session, re-running a step's action only if its `retry_safe` says that is safe to redo. Demonstrated once, for real: member 12345 with the hidden-balance switch pauses on the read step without closing the browser, a genuinely separate process attaches to that same live session over Chrome DevTools Protocol and fixes the page, and replay resumes from that step and reaches success. `evidence/handoff/before_handoff.json`, `human_action.json`, and `after_resume.json` record the same CDP session id and the same run id across all three, which is what proves it is one continuous session, not three separate claims.
 
 ## Safety
 
@@ -89,15 +89,14 @@ Honest limits: the card and account regexes are reasonable heuristics, not a ful
 
 ## Cuts
 
-Built and run for real: the artifact schema, the replay engine's deterministic decision path, the three-way result contract, the safety gate, the locator ladder with rung logging, the real Playwright driver, one genuine discovery run to a success outcome and one to a business outcome, the merge of two discovery drafts into one approved recipe, and real replay runs against the live page covering all four states. The draft to approved lifecycle, the confidence and approval stretch goal, is also already implemented and enforced, not just designed: a draft cannot be invoked, and only a human moving it to approved unlocks that, tested directly.
+Built and run for real: the artifact schema, the replay engine's deterministic decision path, the three-way result contract, the safety gate, the locator ladder with rung logging, the real Playwright driver, one genuine discovery run to a success outcome and one to a business outcome, the merge of two discovery drafts into one approved recipe, and real replay runs against the live page covering all four states. The draft to approved lifecycle, the confidence and approval stretch goal, is also already implemented and enforced, not just designed: a draft cannot be invoked, and only a human moving it to approved unlocks that, tested directly. Same-session human handoff is built and demonstrated too, not just designed: a real pause on a live stuck state, a separate process acting on that exact browser session over CDP, and a resume from the paused step to success, with the same CDP session id and the same run id proven across all three pieces of evidence in `evidence/handoff/`.
 
 Stubbed or design-only:
 
 - A real desktop or non-web driver. The interface supports it, but nothing beyond the web driver was built or tested.
 - Multi-tenant reuse. The schema has the right shape, but no per-tenant binding resolution exists.
-- The operator dashboard for handoff. The state machine is real; the UI is not built.
-- Retry and resume after a handoff. `retry_safe` exists on every step but nothing exercises an actual resume.
+- The operator dashboard for handoff. The state machine, the pause, and the resume are all real; the UI a human would click through is not built, they act by attaching a tool directly to the session.
 - Interstitial dismissal (a recognized dismissable overlay gets clicked through and the run continues) is built into replay.py the same way the slow-load retry is, but this project's page has no such overlay to exercise it against, so unlike the slow-load path it is untested by real evidence.
 - Verifying a recipe by replaying it repeatedly proves little on a static local app, since nothing on the page changes between runs. The replay runs prove the mechanism works, not that the recipe survives a real app changing over time.
 
-Next, in order: resumable execution state with live same-session resume, since a checkpointed execution state, which step, what was bound, what was already observed, is more robust than relying on `retry_safe` alone, which only says a step is safe to redo, not what state to redo it from; a second, structurally different driver, to actually test the heterogeneity claim instead of asserting it; a minimal operator view for handoff, even a plain page with pending requests and a takeover button, to make the mechanism demonstrable end to end; and a second discovery-to-approval cycle against a page that changes between runs, to see whether rung drift catches something real instead of only being exercised against a static one.
+Next, in order: a minimal operator view for handoff, even a plain page listing pending requests with a takeover button, so a human does not need their own CDP tooling to act on a pause; a second, structurally different driver, to actually test the heterogeneity claim instead of asserting it; and a second discovery-to-approval cycle against a page that changes between runs, to see whether rung drift catches something real instead of only being exercised against a static one.
