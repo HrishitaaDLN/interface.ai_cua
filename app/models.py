@@ -121,3 +121,28 @@ class Failure(BaseModel):
 
 
 Result = Success | BusinessOutcome | Failure
+
+
+# ---- pause / resume ---------------------------------------------------------
+# Paused is NOT a fourth member of Result. It is what a resumable replay call
+# returns instead of Failure, at the exact same points Failure would have
+# been returned, when the caller opted into resumability. An ordinary
+# replay() call (resumable=False, the default) never produces one; the
+# three-way contract above is unchanged for every existing caller.
+
+class ResumeState(BaseModel):
+    """Enough to continue a paused run on the SAME driver session: which
+    step to pick back up at, and the recovered-events log so far. Never the
+    page content itself; perceive() re-reads that live when replay resumes.
+    """
+    run_id: str
+    step_index: int
+    recovered: list[RecoveredEvent] = Field(default_factory=list)
+
+
+class Paused(BaseModel):
+    status: Literal["paused"] = "paused"
+    step: str
+    reason: str
+    run_id: str
+    resume: ResumeState

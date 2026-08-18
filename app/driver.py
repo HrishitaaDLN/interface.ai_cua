@@ -58,6 +58,7 @@ class FakeBankDriver:
         self.hide_balance = hide_balance
         self.slow_turns = slow_turns          # perceive()s the detail screen
         self._slow_remaining = 0              # stays "loading" for, before settling
+        self.calls: list[str] = []            # action call log, for resume tests
 
     def _resolve(self, target: Optional[list[Locator]]) -> str:
         # A real driver walks the ladder against the live surface. Here we
@@ -85,6 +86,7 @@ class FakeBankDriver:
 
     def act(self, action, target=None, value=None) -> ActionResult:
         name = self._resolve(target)
+        self.calls.append(f"{action}:{name}")
         if action == "type" and name == "search_box":
             self.query = value or ""
             return ActionResult(True)
@@ -152,13 +154,20 @@ class PlaywrightBankDriver:
     """
 
     def __init__(self, base_url: str = "http://localhost:8080",
-                 headless: bool = True):
+                 headless: bool = True, remote_debug_port: Optional[int] = None):
         from playwright.sync_api import sync_playwright  # local: no hard
         # dependency on Playwright for anything that only uses FakeBankDriver
 
         self.base_url = base_url.rstrip("/")
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=headless)
+        # remote_debug_port is what makes a same-session human handoff
+        # possible: with it set, a completely separate Playwright (or any
+        # CDP-speaking tool) can attach to THIS running browser via
+        # chromium.connect_over_cdp(f"http://localhost:{port}") and act on
+        # the exact page this driver holds, not a fresh one. Off by default
+        # since ordinary replay runs have no need to expose a debug port.
+        args = [f"--remote-debugging-port={remote_debug_port}"] if remote_debug_port else []
+        self._browser = self._pw.chromium.launch(headless=headless, args=args)
         self.page = self._browser.new_page()
         self.rung_log: list[dict] = []  # which ladder rung matched, in order
 
@@ -175,7 +184,25 @@ class PlaywrightBankDriver:
     # -- perceive -------------------------------------------------------
 
     def perceive(self) -> Observation:
-        path = urlparse(self.page.url).path
+        # page.url is Playwright's own cached copy of the last navigation
+        # IT observed. It goes stale if some other CDP client (a human's
+        # own tool, attached via remote_debug_port) navigates the page
+        # instead -- confirmed directly: the live DOM updates correctly but
+        # page.url keeps showing the pre-handoff address. Reading the
+        # location straight from the page's own JS context is what perceive
+        # depends on being right after a human's own action, not this
+        # driver's. But evaluate() can itself race a navigation already in
+        # flight (confirmed directly too: the recoverable slow-load scenario
+        # is exactly a mid-navigation perceive(), and it raised "Execution
+        # context was destroyed"). Fall back to the cached property then --
+        # it may be a step stale, but the content checks below will already
+        # reflect the in-between state and correctly fail the checkpoint,
+        # which is what triggers the bounded retry that scenario relies on.
+        try:
+            live_url = self.page.evaluate("() => window.location.href")
+        except Exception:
+            live_url = self.page.url
+        path = urlparse(live_url).path
         body = self.page.locator("body")
         body_text = body.inner_text()
         tree = body.aria_snapshot()

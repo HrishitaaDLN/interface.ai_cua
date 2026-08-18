@@ -9,7 +9,7 @@
     "step": "d3",
     "expected": "field:savings_balance",
     "observed": "screen=detail",
-    "run_id": "b8e7aacd",
+    "run_id": "196505e3",
     "recovered": []
   },
   "steps_executed": [
